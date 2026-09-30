@@ -118,10 +118,15 @@ struct device_timetable {
       event_type const ev_type) const {
     auto const n_transports =
         static_cast<unsigned>(route_transport_ranges_[r].size());
-    auto const idx = static_cast<unsigned>(
-        route_stop_time_ranges_[r].from_ +
-        n_transports * (stop_idx * 2 - (ev_type == event_type::kArr ? 1 : 0)));
-    return {&route_stop_times_[idx], n_transports};
+    auto const base = route_stop_time_ranges_[r].from_;
+    if (ev_type == event_type::kDep) {
+      auto const idx = static_cast<unsigned>(base + n_transports * stop_idx);
+      return {&departure_route_stop_times_[idx], n_transports};
+    } else {
+      auto const idx =
+          static_cast<unsigned>(base + n_transports * (stop_idx - 1));
+      return {&arrival_route_stop_times_[idx], n_transports};
+    }
   }
 
   __device__ delta event_mam(route_idx_t const r,
@@ -130,11 +135,17 @@ struct device_timetable {
                              event_type const ev_type) const {
     auto const range = route_transport_ranges_[r];
     auto const n_transports = static_cast<unsigned>(range.size());
-    auto const route_stop_begin = static_cast<unsigned>(
-        route_stop_time_ranges_[r].from_ +
-        n_transports * (stop_idx * 2 - (ev_type == event_type::kArr ? 1 : 0)));
+    auto const base = route_stop_time_ranges_[r].from_;
     auto const t_idx_in_route = to_idx(t) - to_idx(range.from_);
-    return route_stop_times_[route_stop_begin + t_idx_in_route];
+    if (ev_type == event_type::kDep) {
+      auto const route_stop_begin =
+          static_cast<unsigned>(base + n_transports * stop_idx);
+      return departure_route_stop_times_[route_stop_begin + t_idx_in_route];
+    } else {
+      auto const route_stop_begin =
+          static_cast<unsigned>(base + n_transports * (stop_idx - 1));
+      return arrival_route_stop_times_[route_stop_begin + t_idx_in_route];
+    }
   }
 
   __device__ interval<date::sys_days> internal_interval_days() const {
@@ -152,7 +163,8 @@ struct device_timetable {
                    kNProfiles>
       footpaths_in_;
 
-  cuda::std::span<delta const> route_stop_times_;
+  cuda::std::span<delta const> departure_route_stop_times_;
+  cuda::std::span<delta const> arrival_route_stop_times_;
   d_vecmap_view<route_idx_t, interval<std::uint32_t>> route_stop_time_ranges_;
   d_vecmap_view<route_idx_t, interval<transport_idx_t>> route_transport_ranges_;
   d_vecmap_view<route_idx_t, clasz> route_clasz_;
