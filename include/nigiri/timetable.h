@@ -182,6 +182,14 @@ struct timetable {
     return event_mam(transport_route_[t], t, stop_idx, ev_type);
   }
 
+  delta const* event_mam_ptr(route_idx_t const r,
+                             transport_idx_t const t,
+                             stop_idx_t const stop_idx,
+                             event_type const ev_type) const {
+    return &event_times_at_stop(
+        r, stop_idx, ev_type)[to_idx(t - route_transport_ranges_[r].from_)];
+  }
+
   unixtime_t event_time(nigiri::transport t,
                         stop_idx_t const stop_idx,
                         event_type const ev_type) const {
