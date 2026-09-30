@@ -106,8 +106,12 @@ struct raptor {
           end_reachable_.set(i, true);
         }
       }
-      for (auto const& [l, _] : td_dist_to_end_) {
-        end_reachable_.set(to_idx(l), true);
+      if (!td_dist_to_end_.empty()) {
+        has_td_dist_to_end_.resize(n_locations_);
+        for (auto const& [l, _] : td_dist_to_end_) {
+          end_reachable_.set(to_idx(l), true);
+          has_td_dist_to_end_.set(to_idx(l), true);
+        }
       }
     }
   }
@@ -221,12 +225,11 @@ struct raptor {
           best_[i][v] = get_best(round_times_[k][i][v], best_[i][v]);
         }
       }
-      is_dest_.for_each_set_bit([&](std::uint64_t const i) {
-        update_time_at_dest(k, best_[i][Vias]);
-      });
+      is_dest_.for_each_set_bit(
+          [&](auto const i) { update_time_at_dest(k, best_[i][Vias]); });
 
       auto any_marked = false;
-      state_.station_mark_.for_each_set_bit([&](std::uint64_t const i) {
+      state_.station_mark_.for_each_set_bit([&](auto const i) {
         for (auto const& r : tt_.location_routes_[location_idx_t{i}]) {
           any_marked = true;
           state_.route_mark_.set(to_idx(r), true);
@@ -678,7 +681,7 @@ private:
   }
 
   void update_transfers(unsigned const k) {
-    state_.prev_station_mark_.for_each_set_bit([&](auto&& i) {
+    state_.prev_station_mark_.for_each_set_bit([&](auto const i) {
       for (auto v = 0U; v != Vias + 1; ++v) {
         auto const tmp_time = tmp_[i][v];
         if (tmp_time == kInvalid) {
@@ -743,7 +746,7 @@ private:
   }
 
   void update_footpaths(unsigned const k) {
-    state_.prev_station_mark_.for_each_set_bit([&](std::uint64_t const i) {
+    state_.prev_station_mark_.for_each_set_bit([&](auto const i) {
       auto const l_idx = location_idx_t{i};
       if constexpr (Rt) {
         if (prf_idx_ != 0U && (kFwd ? rtt_->has_td_footpaths_out_
@@ -767,19 +770,21 @@ private:
             continue;
           }
 
-          auto const start_is_via =
-              v != Vias && is_via_[v][static_cast<bitvec::size_type>(i)];
-          auto const start_v = start_is_via ? v + 1 : v;
-
-          auto const target_is_via =
-              start_v != Vias && is_via_[start_v][target];
-          auto const target_v = target_is_via ? start_v + 1 : start_v;
+          auto target_v = v;
           auto stay = 0_minutes;
-          if (start_is_via) {
-            stay += via_stops_[v].stay_;
-          }
-          if (target_is_via) {
-            stay += via_stops_[start_v].stay_;
+          if constexpr (Vias != 0U) {
+            auto const start_is_via =
+                v < Vias && is_via_[v][static_cast<bitvec::size_type>(i)];
+            auto const start_v = start_is_via ? v + 1 : v;
+            auto const target_is_via =
+                start_v < Vias && is_via_[start_v][target];
+            target_v = target_is_via ? start_v + 1 : start_v;
+            if (start_is_via) {
+              stay += via_stops_[v].stay_;
+            }
+            if (target_is_via) {
+              stay += via_stops_[start_v].stay_;
+            }
           }
 
           auto const fp_target_time = clamp(
@@ -853,7 +858,7 @@ private:
       return;
     }
 
-    state_.prev_station_mark_.for_each_set_bit([&](std::uint64_t const i) {
+    state_.prev_station_mark_.for_each_set_bit([&](auto const i) {
       auto const l_idx = location_idx_t{i};
       if (!(kFwd ? rtt_->has_td_footpaths_out_
                  : rtt_->has_td_footpaths_in_)[prf_idx_]
@@ -875,19 +880,21 @@ private:
 
           auto const target = to_idx(fp.target());
 
-          auto const start_is_via =
-              v != Vias && is_via_[v][static_cast<bitvec::size_type>(i)];
-          auto const start_v = start_is_via ? v + 1 : v;
-
-          auto const target_is_via =
-              start_v != Vias && is_via_[start_v][target];
-          auto const target_v = target_is_via ? start_v + 1 : start_v;
+          auto target_v = v;
           auto stay = 0_minutes;
-          if (start_is_via) {
-            stay += via_stops_[v].stay_;
-          }
-          if (target_is_via) {
-            stay += via_stops_[start_v].stay_;
+          if constexpr (Vias != 0U) {
+            auto const start_is_via =
+                v < Vias && is_via_[v][static_cast<bitvec::size_type>(i)];
+            auto const start_v = start_is_via ? v + 1 : v;
+            auto const target_is_via =
+                start_v < Vias && is_via_[start_v][target];
+            target_v = target_is_via ? start_v + 1 : start_v;
+            if (start_is_via) {
+              stay += via_stops_[v].stay_;
+            }
+            if (target_is_via) {
+              stay += via_stops_[start_v].stay_;
+            }
           }
 
           auto const fp_target_time =
@@ -956,14 +963,7 @@ private:
       return;
     }
 
-    state_.prev_station_mark_.for_each_set_bit([&](auto const i) {
-      if (!end_reachable_.test(i)) {
-        trace_upd("┊ ├k={}   no end_reachable: {}\n", k,
-                  loc{tt_, location_idx_t{i}});
-        [[likely]];
-        return;
-      }
-
+    auto const process = [&](auto const i) {
       trace_upd("┊ ├k={}   end_reachable: {}\n", k,
                 loc{tt_, location_idx_t{i}});
 
@@ -1025,13 +1025,13 @@ private:
         }
       }
 
-      if (auto const it = td_dist_to_end_.find(l); it != end(td_dist_to_end_)) {
-        [[unlikely]];
-
+      if (has_td_dist_to_end_.test(i)) [[unlikely]] {
         auto const fp_start_time = tmp_[i][Vias];
         if (fp_start_time == kInvalid) {
           return;
         }
+        auto const it = td_dist_to_end_.find(l);
+        assert(it != end(td_dist_to_end_));
         auto const fp =
             get_td_duration<SearchDir>(it->second, to_unix(fp_start_time));
         if (fp.has_value()) {
@@ -1058,7 +1058,8 @@ private:
           }
         }
       }
-    });
+    };
+    state_.prev_station_mark_.for_each_set_bit(end_reachable_, process);
   }
 
   template <bool WithSectionBikeFilter,
@@ -1511,6 +1512,7 @@ private:
   std::uint32_t n_locations_, n_routes_, n_rt_transports_;
   raptor_state& state_;
   bitvec end_reachable_;
+  bitvec has_td_dist_to_end_;
   std::span<std::array<delta_t, Vias + 1>> tmp_;
   std::span<std::array<delta_t, Vias + 1>> best_;
   flat_matrix_view<std::array<delta_t, Vias + 1>> round_times_;
